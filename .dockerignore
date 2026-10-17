@@ -1,10 +1,8 @@
-.git
-**/__pycache__
-**/.venv
-backend/htmlcov
-frontend/blob-report
-frontend/dist
-frontend/node_modules
-frontend/playwright-report
-frontend/test-results
-node_modules
+# Python
+__pycache__
+app.egg-info
+*.pyc
+.mypy_cache
+.coverage
+htmlcov
+.venv

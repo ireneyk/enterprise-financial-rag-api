@@ -1,293 +1,145 @@
-# Financial Docs AI (Enterprise RAG Microservice)
+# FastAPI Project - Backend
 
-[![Python 3.14](https://img.shields.io/badge/python-3.14-blue.svg)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.141+-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![PostgreSQL + pgvector](https://img.shields.io/badge/PostgreSQL-pgvector-336791.svg?logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
-[![OpenAI](https://img.shields.io/badge/OpenAI-gpt--4o--mini%20%7C%20text--embedding--3--small-412991.svg?logo=openai&logoColor=white)](https://platform.openai.com/)
-[![Tests](https://img.shields.io/badge/Tests-72%20Passed-brightgreen.svg)](https://pytest.org)
+## Requirements
 
-**Financial Docs AI** is a production-grade, headless backend microservice engineered for high-accuracy financial document ingestion, token-aware semantic chunking, high-dimensional vector search via `pgvector`, and hallucination-free grounded question-answering with OpenAI LLMs.
+* [Docker](https://www.docker.com/).
+* [uv](https://docs.astral.sh/uv/) for Python package and environment management.
 
----
+## Local Development
 
-## Architecture Flow
+Run the backend locally and connect it to PostgreSQL in Docker Compose.
 
-```
-┌─────────────────────────┐
-│     Client / React      │  (HTTP / JSON & Multipart Uploads)
-│        Frontend         │
-└────────────┬────────────┘
-             │ Bearer JWT Auth & Requests
-             ▼
-┌─────────────────────────┐
-│         FastAPI         │  • JWT Authentication & RBAC
-│   Backend Microservice  │  • PDF Extraction (PyMuPDF / pypdf)
-│                         │  • Token-Aware Chunking (tiktoken ~500 tokens / 50 overlap)
-└──────┬───────────┬──────┘
-       │           │
-       │ Vectorize │ Cosine Similarity Search
-       │ & Query   │
-       ▼           ▼
-┌──────────────┐  ┌──────────────────────────────────────────────┐
-│    OpenAI    │  │             PostgreSQL + pgvector            │
-│     APIs     │  │                                              │
-│              │  │  • FinancialDocument (Metadata & Status)     │
-│  • Embeddings│◄─┼─ • DocumentChunk (Vector[1536] Embeddings)   │
-│  • gpt-4o-   │  │  • Cosine Distance Index (<=> operator)      │
-│    mini      │  └──────────────────────────────────────────────┘
-└──────────────┘
+From the project root, start PostgreSQL and Mailpit:
+
+```console
+$ docker compose up -d db mailpit
 ```
 
-### Ingestion & Query Lifecycle
+Then, from `./backend/`, install the dependencies, prepare the database, and start the development server:
 
-1. **Ingest & Extract (`POST /api/v1/financial-docs/upload`)**:
-   - The client uploads an earnings report or SEC filing (PDF).
-   - `PyMuPDF` extracts the raw textual data with zero quality loss (with `pypdf` automated fallback).
-   - `tiktoken` splits the document into semantic chunks (~500 tokens with 50-token sliding overlap).
-   - `text-embedding-3-small` generates 1536-dimensional dense vectors.
-   - Text chunks and vector embeddings are stored transactionally in PostgreSQL using `pgvector`.
-
-2. **Retrieve & Ground (`POST /api/v1/financial-docs/query`)**:
-   - User submits a financial question, optionally filtered by `document_id`.
-   - The query is vectorized and compared against indexed chunks via cosine distance (`DocumentChunk.embedding <=> query_vector`).
-   - The top 5 highest-similarity chunks are injected into an adversarial anti-hallucination prompt.
-   - `gpt-4o-mini` generates a strictly grounded answer with verifiable citation excerpts.
-
----
-
-## Tech Stack
-
-| Component | Technology | Purpose |
-| :--- | :--- | :--- |
-| **API Framework** | **FastAPI** | High-performance asynchronous REST microservice |
-| **Relational Database** | **PostgreSQL 17** | Document metadata, chunks, and relational tables |
-| **Vector Search** | **pgvector** | Native vector embeddings & cosine distance operator (`<=>`) |
-| **ORM / Data Modeling**| **SQLModel / SQLAlchemy** | Type-safe models with Pydantic and SQLAlchemy 2.0 integration |
-| **Database Migrations** | **Alembic** | Automated linear database schema versioning |
-| **Package Manager** | **uv** | Ultra-fast Python package and project dependency management |
-| **PDF Extraction** | **PyMuPDF (`fitz`) / pypdf** | Robust text and table extraction from financial PDFs |
-| **Tokenization** | **tiktoken** | Accurate BPE tokenization matching OpenAI model boundaries |
-| **AI / Embeddings** | **OpenAI SDK** | `text-embedding-3-small` (1536 dims) & `gpt-4o-mini` |
-| **Testing** | **PyTest** | Unit, service, and API integration test coverage |
-| **Containerization** | **Docker & Docker Compose** | Reproducible multi-container microservice infrastructure |
-
----
-
-## Project Structure
-
-```
-.
-├── backend/
-│   ├── app/
-│   │   ├── alembic/              # Linear database migrations (including pgvector)
-│   │   ├── api/
-│   │   │   ├── routes/           # Endpoint handlers (financial_docs, login, users)
-│   │   │   ├── routers/          # Router exports
-│   │   │   ├── deps.py           # JWT Authentication & DB session dependencies
-│   │   │   └── main.py           # Aggregated API router
-│   │   ├── core/
-│   │   │   ├── config.py         # Pydantic Settings & environment variables
-│   │   │   ├── db.py             # DB engine, pgvector extension init & seeding
-│   │   │   └── security.py       # Password hashing & JWT token creation
-│   │   ├── models/
-│   │   │   ├── __init__.py       # Re-exported domain models
-│   │   │   └── rag.py            # FinancialDocument & DocumentChunk (Vector[1536])
-│   │   ├── services/
-│   │   │   └── rag_service.py    # Core business logic: PDF, chunk, embed, search
-│   │   ├── main.py               # FastAPI application entrypoint
-│   │   └── utils.py              # Utility functions
-│   ├── pyproject.toml            # Backend dependencies and tools
-│   └── tests/                    # 72 automated pytest test cases
-├── scripts/
-│   └── init-db.sql               # Docker Postgres init: CREATE EXTENSION vector
-├── compose.yml                   # Production / baseline Docker Compose configuration
-├── compose.override.yml          # Development Compose configuration
-├── docker-compose.yml            # Standard Docker Compose alias
-├── docker-compose.override.yml   # Standard Docker Compose override alias
-├── .env                          # Environment variables configuration
-└── README.md
+```console
+$ uv sync
+$ uv run bash scripts/prestart.sh
+$ uv run fastapi dev
 ```
 
----
+The API is available at `http://localhost:8000`, with automatic interactive docs at `http://localhost:8000/docs`.
 
-## Local Setup & Execution
+## General Workflow
 
-### 1. Prerequisites
-- [Docker](https://docs.docker.com/get-docker/) & Docker Compose
-- OpenAI API Key
+Run backend commands from `./backend/` with `uv run`. Make sure your editor uses the Python interpreter at `.venv/bin/python` in the project root.
 
-### 2. Configure Environment Variables
-Copy or edit `.env` in the project root:
+Modify or add SQLModel models for data and SQL tables in `./backend/app/models.py`, API endpoints in `./backend/app/api/`, CRUD (Create, Read, Update, Delete) utils in `./backend/app/crud.py`.
+
+## VS Code
+
+There are already configurations in place to run the backend through the VS Code debugger, so that you can use breakpoints, pause and explore variables, etc.
+
+The setup is also already configured so you can run the tests through the VS Code Python tests tab.
+
+## Full Stack with Docker Compose
+
+To run the backend and built frontend in Docker Compose:
+
+```console
+$ docker compose run --rm backend bash scripts/prestart.sh
+$ docker compose watch
+```
+
+The application is available at `http://localhost:8000`.
+
+### Docker Compose Override
+
+The `compose.override.yml` file contains local settings for published ports, source synchronization, automatic image rebuilds, and backend reloads. Docker Compose applies it automatically when you run `docker compose` without an explicit file list.
+
+To open a shell in the backend container:
+
+```console
+$ docker compose exec backend bash
+```
+
+## Backend Tests
+
+To test the backend from the `backend` directory, run:
+
+```console
+$ uv run bash scripts/test.sh
+```
+
+The tests run with Pytest. Modify existing tests or add new ones in `./backend/tests/`.
+
+If you use GitHub Actions, the tests will run automatically.
+
+### Test a Running Stack
+
+If your stack is already up and you just want to run the tests, you can use:
 
 ```bash
-# General
-FASTAPI_ENV=development
-PROJECT_NAME="Financial Docs AI"
-
-# Secrets (Change for production)
-SECRET_KEY=supersecretkey-financial-docs-rag-2026
-FIRST_SUPERUSER=admin@example.com
-FIRST_SUPERUSER_PASSWORD=adminpassword123
-
-# OpenAI API Key
-OPENAI_API_KEY=sk-proj-your-actual-openai-api-key
-
-# Database
-POSTGRES_PASSWORD=postgrespassword
-DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/app
+docker compose exec backend bash scripts/tests-start.sh
 ```
 
-### 3. Run with Docker Compose
+The `/app/backend/scripts/tests-start.sh` script calls `pytest`. If you need to pass extra arguments to `pytest`, you can pass them to that command and they will be forwarded.
 
-Launch the PostgreSQL (with pgvector), Traefik proxy, and FastAPI backend microservice:
+For example, to stop on first error:
 
 ```bash
-docker compose up -d
+docker compose exec backend bash scripts/tests-start.sh -x
 ```
 
-*(or using legacy syntax)*:
-```bash
-docker-compose up -d
+### Test Coverage
+
+When the tests run, they generate `htmlcov/index.html`. Open it in your browser to inspect the test coverage.
+
+## Migrations
+
+Make sure you create a revision of your models and upgrade the database with that revision every time you change them. From the `backend` directory, use `uv` to run Alembic against the PostgreSQL container:
+
+* Alembic is already configured to import your SQLModel models from `./backend/app/models.py`.
+
+* After changing a model (for example, adding a column), create a revision:
+
+```console
+$ uv run alembic revision --autogenerate -m "Add column last_name to User model"
 ```
 
-Check container health:
-```bash
-docker compose ps
+* Commit to the git repository the files generated in the alembic directory.
+
+* After creating the revision, run the migration in the database (this is what will actually change the database):
+
+```console
+$ uv run alembic upgrade head
 ```
 
-The API will be available at:
-- **Interactive OpenAPI Docs**: `http://localhost:8000/docs`
-- **Alternative ReDoc**: `http://localhost:8000/redoc`
-- **Health Check**: `http://localhost:8000/api/v1/utils/health-check/`
+If you don't want to use migrations at all, uncomment the lines in the file at `./backend/app/core/db.py` that end in:
 
----
-
-## API Usage & cURL Examples
-
-### 1. Authenticate & Obtain Bearer Token
-
-```bash
-curl -X POST "http://localhost:8000/api/v1/login/access-token" \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "username=admin@example.com&password=adminpassword123"
+```python
+SQLModel.metadata.create_all(engine)
 ```
 
-**Response**:
-```json
-{
-  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "token_type": "bearer"
-}
+and comment the line in the file `scripts/prestart.sh` that contains:
+
+```console
+$ alembic upgrade head
 ```
 
-Save your token:
-```bash
-export TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+If you don't want to start with the default models and want to remove them / modify them, from the beginning, without having any previous revision, you can remove the revision files (`.py` Python files) under `./backend/app/alembic/versions/`. And then create a first migration as described above.
+
+## Email Templates
+
+The email templates are written with [React Email](https://react.email) in `./packages/react-email/`. The `emails` directory holds one component per email and the `ui` directory holds the shared components (layout, heading, button, link, callout).
+
+The rendered HTML in `./backend/app/email-templates/` is generated from those components. It is what the application sends and should not be edited by hand.
+
+To preview the emails while editing them, start the dev server from the root of the project:
+
+```console
+$ bun run email:dev
 ```
 
----
+Values coming from the backend are declared as Jinja placeholders in the component props, for example `username = "{{ username }}"`. The context for each email is built in `generate_*_email()` in `./backend/app/utils.py`, so a new placeholder needs to be added there too.
 
-### 2. Upload and Ingest a Financial Document (PDF)
+Once you are done, regenerate the templates used by the application:
 
-Upload any financial statement, quarterly earnings, or 10-K filing:
-
-```bash
-curl -X POST "http://localhost:8000/api/v1/financial-docs/upload" \
-  -H "Authorization: Bearer $TOKEN" \
-  -F "file=@q3_financial_report.pdf;type=application/pdf"
+```console
+$ bun run email:export
 ```
-
-**Response**:
-```json
-{
-  "document_id": 1,
-  "filename": "q3_financial_report.pdf",
-  "status": "completed",
-  "chunks_count": 24,
-  "message": "Document successfully processed, embedded, and indexed for search."
-}
-```
-
----
-
-### 3. Query Financial Documents with Grounded Citations
-
-Query across all financial documents:
-
-```bash
-curl -X POST "http://localhost:8000/api/v1/financial-docs/query" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "What were the total quarterly revenues and operating margins?"
-  }'
-```
-
-Query scoped to a specific document (`document_id`):
-
-```bash
-curl -X POST "http://localhost:8000/api/v1/financial-docs/query" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "What were the primary revenue drivers according to management?",
-    "document_id": 1
-  }'
-```
-
-**Response**:
-```json
-{
-  "query": "What were the total quarterly revenues and operating margins?",
-  "answer": "According to the Q3 Financial Report, total revenue reached $85.8 billion, representing a 5% increase year-over-year. The operating margin was 30.2%, driven by strong performance in the Services division.",
-  "citations": [
-    "Consolidated Statements of Operations: Total net sales were $85,777 million compared to $81,797 million in the year-ago quarter. Operating income was $25,352 million, yielding an operating margin of 30.2%.",
-    "Services segment revenue reached an all-time record of $24.2 billion, up 14% year-over-year, significantly expanding the gross margin profile."
-  ]
-}
-```
-
----
-
-### 4. List and Manage Uploaded Documents
-
-**List all indexed documents**:
-```bash
-curl -X GET "http://localhost:8000/api/v1/financial-docs/" \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-**Delete a document and cascade chunk removal**:
-```bash
-curl -X DELETE "http://localhost:8000/api/v1/financial-docs/1" \
-  -H "Authorization: Bearer $TOKEN"
-```
-
----
-
-## Running Automated Tests
-
-Run the complete test suite using `uv` and `pytest`:
-
-```bash
-cd backend
-uv run pytest
-```
-
-Run test suite with coverage report:
-```bash
-uv run coverage run -m pytest
-uv run coverage report
-```
-
-Run code formatting and linting:
-```bash
-uv run ruff check app tests
-uv run ruff format app tests
-```
-
----
-
-## License
-
-This project is licensed under the MIT License.
