@@ -1,0 +1,11 @@
+{
+  "name": "fastapi-rag-service",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "email:dev": "bun run --filter emails dev",
+    "email:export": "bun run --filter emails export"
+  }
+}
